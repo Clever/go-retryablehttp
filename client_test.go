@@ -949,6 +949,79 @@ func TestClient_BackoffCustom(t *testing.T) {
 	}
 }
 
+const (
+	d = 100 * time.Millisecond
+)
+
+// dFromDuration converts a duration to the nearest multiple of the global constant d. This is
+// borrowed from Go's time/rate unit tests.
+// https://cs.opensource.google/go/x/time/+/583f2d63:rate/rate_test.go;l=236
+func dFromDuration(dur time.Duration) int {
+	return int((dur + (d / 2)) / d)
+}
+
+// limiterDelayOk reports whether a rate limiter delay is "close enough" to expected values. This
+// uses increments of `d` to account for scheduler overhead.
+// https://cs.opensource.google/go/x/time/+/583f2d63:rate/rate_test.go;l=423
+func limiterDelayOk(wantD, gotD int) bool {
+	// The limiter didn't wait long enough
+	if gotD < wantD {
+		return false
+	}
+
+	// The limiter waited too long. This gives 150% grace to account for scheduler overhead.
+	maxD := (wantD*3 + 1) / 2
+	return gotD <= maxD
+}
+
+func TestClient_LimiterCustom(t *testing.T) {
+	var retries int32
+
+	limiterDuration := 500 * time.Millisecond
+
+	client := NewClient()
+	client.RetryMax = 2
+	client.Backoff = func(min, max time.Duration, attemptNum int, resp *http.Response) time.Duration {
+		return 0
+	}
+	client.Limiter = func(ctx context.Context) error {
+		atomic.AddInt32(&retries, 1)
+		time.Sleep(limiterDuration)
+		return nil
+	}
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if atomic.LoadInt32(&retries) == int32(client.RetryMax) {
+			w.WriteHeader(200)
+			return
+		}
+		w.WriteHeader(500)
+	}))
+	defer ts.Close()
+
+	// Make the request.
+	start := time.Now()
+	resp, err := client.Get(ts.URL + "/foo/bar")
+	delay := time.Since(start)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	resp.Body.Close()
+
+	expectedDelay := time.Duration(int64(client.RetryMax) * int64(limiterDuration))
+
+	// Convert to increments of `d` to offset any scheduler delays.
+	expectedD := dFromDuration(expectedDelay)
+	actualD := dFromDuration(delay)
+
+	if !limiterDelayOk(expectedD, actualD) {
+		loggingExpected := int64(expectedD) * int64(d) / int64(time.Millisecond)
+		loggigngActual := int64(actualD) * int64(d) / int64(time.Millisecond)
+		t.Fatalf("expected rate limiter delay (ms): %d != %d", loggingExpected, loggigngActual)
+	}
+}
+
 func TestClient_StandardClient(t *testing.T) {
 	// Create a retryable HTTP client.
 	client := NewClient()
