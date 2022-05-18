@@ -1017,8 +1017,8 @@ func TestClient_LimiterCustom(t *testing.T) {
 
 	if !limiterDelayOk(expectedD, actualD) {
 		loggingExpected := int64(expectedD) * int64(d) / int64(time.Millisecond)
-		loggigngActual := int64(actualD) * int64(d) / int64(time.Millisecond)
-		t.Fatalf("expected rate limiter delay (ms): %d != %d", loggingExpected, loggigngActual)
+		loggingActual := int64(actualD) * int64(d) / int64(time.Millisecond)
+		t.Fatalf("expected rate limiter delay (ms): %d != %d", loggingExpected, loggingActual)
 	}
 }
 
