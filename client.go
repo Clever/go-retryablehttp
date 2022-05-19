@@ -362,6 +362,9 @@ type CheckRetry func(ctx context.Context, resp *http.Response, err error) (bool,
 // that should pass before trying again.
 type Backoff func(min, max time.Duration, attemptNum int, resp *http.Response) time.Duration
 
+// Limiter governs the rate of HTTP calls. This function is invoked before each HTTP request.
+type Limiter func(ctx context.Context) error
+
 // ErrorHandler is called if retries are expired, containing the last status
 // from the http library. If not specified, default behavior for the library is
 // to close the body and return an error indicating how many tries were
@@ -393,6 +396,9 @@ type Client struct {
 	// Backoff specifies the policy for how long to wait between retries
 	Backoff Backoff
 
+	// Limiter governs the rate of HTTP calls.
+	Limiter Limiter
+
 	// ErrorHandler specifies the custom error handler to use, if any
 	ErrorHandler ErrorHandler
 
@@ -410,6 +416,7 @@ func NewClient() *Client {
 		RetryMax:     defaultRetryMax,
 		CheckRetry:   DefaultRetryPolicy,
 		Backoff:      DefaultBackoff,
+		Limiter:      DefaultLimiter,
 	}
 }
 
@@ -429,6 +436,11 @@ func (c *Client) logger() interface{} {
 	})
 
 	return c.Logger
+}
+
+// DefaultLimiter provides a default rate limiter for HTTP requests. It simply noops.
+func DefaultLimiter(ctx context.Context) error {
+	return nil
 }
 
 // DefaultRetryPolicy provides a default callback for Client.CheckRetry, which
@@ -611,6 +623,14 @@ func (c *Client) Do(req *Request) (*http.Response, error) {
 			} else {
 				req.Body = ioutil.NopCloser(body)
 			}
+		}
+
+		limiterErr := c.Limiter(req.Context())
+		switch v := logger.(type) {
+		case LeveledLogger:
+			v.Error("rate limiter failed", "error", limiterErr, "method", req.Method, "url", req.URL)
+		case Logger:
+			v.Printf("[ERR] %s %s rate limiter failed: %v", req.Method, req.URL, limiterErr)
 		}
 
 		if c.RequestLogHook != nil {

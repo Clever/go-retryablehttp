@@ -949,6 +949,61 @@ func TestClient_BackoffCustom(t *testing.T) {
 	}
 }
 
+// limiterDelayOk reports whether a rate limiter delay is "close enough" to expected values.
+// Inspired by https://cs.opensource.google/go/x/time/+/583f2d63:rate/rate_test.go;l=423
+func limiterDelayOk(wantInterval, gotInterval time.Duration) bool {
+	// The limiter didn't wait long enough
+	if gotInterval < wantInterval {
+		return false
+	}
+
+	// The limiter waited too long. This gives 150% grace to account for scheduler overhead.
+	maxInterval := (wantInterval*3 + 1) / 2
+	return gotInterval <= maxInterval
+}
+
+func TestClient_LimiterCustom(t *testing.T) {
+	var retries int32
+
+	limiterDuration := time.Duration(500 * time.Millisecond)
+
+	client := NewClient()
+	client.RetryMax = 2
+	client.Backoff = func(min, max time.Duration, attemptNum int, resp *http.Response) time.Duration {
+		return 0
+	}
+	client.Limiter = func(ctx context.Context) error {
+		atomic.AddInt32(&retries, 1)
+		time.Sleep(limiterDuration)
+		return nil
+	}
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if atomic.LoadInt32(&retries) == int32(client.RetryMax) {
+			w.WriteHeader(200)
+			return
+		}
+		w.WriteHeader(500)
+	}))
+	defer ts.Close()
+
+	// Make the request.
+	start := time.Now()
+	resp, err := client.Get(ts.URL + "/foo/bar")
+	delay := time.Since(start)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
+	resp.Body.Close()
+
+	expectedDelay := time.Duration(int64(client.RetryMax) * int64(limiterDuration))
+
+	if !limiterDelayOk(expectedDelay, delay) {
+		t.Fatalf("rate limiter delay out of bounds: want %d, got %d", expectedDelay, delay)
+	}
+}
+
 func TestClient_StandardClient(t *testing.T) {
 	// Create a retryable HTTP client.
 	client := NewClient()
