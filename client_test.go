@@ -949,35 +949,23 @@ func TestClient_BackoffCustom(t *testing.T) {
 	}
 }
 
-const (
-	d = 100 * time.Millisecond
-)
-
-// dFromDuration converts a duration to the nearest multiple of the global constant d. This is
-// borrowed from Go's time/rate unit tests.
-// https://cs.opensource.google/go/x/time/+/583f2d63:rate/rate_test.go;l=236
-func dFromDuration(dur time.Duration) int {
-	return int((dur + (d / 2)) / d)
-}
-
-// limiterDelayOk reports whether a rate limiter delay is "close enough" to expected values. This
-// uses increments of `d` to account for scheduler overhead.
-// https://cs.opensource.google/go/x/time/+/583f2d63:rate/rate_test.go;l=423
-func limiterDelayOk(wantD, gotD int) bool {
+// limiterDelayOk reports whether a rate limiter delay is "close enough" to expected values.
+// Inspired by https://cs.opensource.google/go/x/time/+/583f2d63:rate/rate_test.go;l=423
+func limiterDelayOk(wantInterval, gotInterval time.Duration) bool {
 	// The limiter didn't wait long enough
-	if gotD < wantD {
+	if gotInterval < wantInterval {
 		return false
 	}
 
 	// The limiter waited too long. This gives 150% grace to account for scheduler overhead.
-	maxD := (wantD*3 + 1) / 2
-	return gotD <= maxD
+	maxInterval := (wantInterval*3 + 1) / 2
+	return gotInterval <= maxInterval
 }
 
 func TestClient_LimiterCustom(t *testing.T) {
 	var retries int32
 
-	limiterDuration := 500 * time.Millisecond
+	limiterDuration := time.Duration(500 * time.Millisecond)
 
 	client := NewClient()
 	client.RetryMax = 2
@@ -1011,14 +999,8 @@ func TestClient_LimiterCustom(t *testing.T) {
 
 	expectedDelay := time.Duration(int64(client.RetryMax) * int64(limiterDuration))
 
-	// Convert to increments of `d` to offset any scheduler delays.
-	expectedD := dFromDuration(expectedDelay)
-	actualD := dFromDuration(delay)
-
-	if !limiterDelayOk(expectedD, actualD) {
-		loggingExpected := int64(expectedD) * int64(d) / int64(time.Millisecond)
-		loggingActual := int64(actualD) * int64(d) / int64(time.Millisecond)
-		t.Fatalf("expected rate limiter delay (ms): %d != %d", loggingExpected, loggingActual)
+	if !limiterDelayOk(expectedDelay, delay) {
+		t.Fatalf("rate limiter delay out of bounds: want %d, got %d", expectedDelay, delay)
 	}
 }
 
