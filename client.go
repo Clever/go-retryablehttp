@@ -626,11 +626,13 @@ func (c *Client) Do(req *Request) (*http.Response, error) {
 		}
 
 		limiterErr := c.Limiter(req.Context())
-		switch v := logger.(type) {
-		case LeveledLogger:
-			v.Error("rate limiter failed", "error", limiterErr, "method", req.Method, "url", req.URL)
-		case Logger:
-			v.Printf("[ERR] %s %s rate limiter failed: %v", req.Method, req.URL, limiterErr)
+		if limiterErr != nil {
+			switch v := logger.(type) {
+			case LeveledLogger:
+				v.Error("rate limiter failed", "error", limiterErr, "method", req.Method, "url", req.URL)
+			case Logger:
+				v.Printf("[ERR] %s %s rate limiter failed: %v", req.Method, req.URL, limiterErr)
+			}
 		}
 
 		if c.RequestLogHook != nil {
