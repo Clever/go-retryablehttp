@@ -7,7 +7,7 @@ references:
   environments:
     tmp: &TEST_RESULTS_PATH /tmp/test-results
 
-environment: &ENVIRONMENT
+environment:
   TEST_RESULTS: "/tmp/test-results"
 
 jobs:
@@ -26,7 +26,7 @@ jobs:
       - go/load-cache
       - go/mod-download
       - go/save-cache
-      - run: 
+      - run:
           name: Run go format
           command: |
             files=$(go fmt ./...)
@@ -35,8 +35,8 @@ jobs:
               echo "$files"
               exit 1
             fi
-      - run: 
-          name: Run tests with gotestsum 
+      - run:
+          name: Run tests with gotestsum
           command: |
             PACKAGE_NAMES=$(go list ./...)
             gotestsum --format=short-verbose --junitfile $TEST_RESULTS/go-retryablyhttp/gotestsum-report.xml -- $PACKAGE_NAMES
@@ -44,6 +44,7 @@ jobs:
           path: *TEST_RESULTS_PATH
       - store_artifacts:
           path: *TEST_RESULTS_PATH
+      - run: ../ci-scripts/circleci/catalog-sync $CATAPULT_URL $CATAPULT_USER $CATAPULT_PASS go-retryablehttp utility
 
 workflows:
   go-retryablehttp:
